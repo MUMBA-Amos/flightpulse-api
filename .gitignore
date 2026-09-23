@@ -1,0 +1,14 @@
+# Secrets (Databricks connection details)
+.env
+.env.*
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# System files
+.DS_Store
+
+# Template with setting names only
+!.env.example
