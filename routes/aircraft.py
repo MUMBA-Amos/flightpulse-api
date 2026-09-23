@@ -1,9 +1,10 @@
 import re
 import threading
 import time
+from typing import Optional
 
 import httpx
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 from fastapi.encoders import jsonable_encoder
 
 from database.databricks import run_query
@@ -28,11 +29,20 @@ _route_cache_lock = threading.Lock()
 
 
 @router.get("/")
-def get_aircraft():
-    return jsonable_encoder(run_query("""
+def get_aircraft(
+    airborne: Optional[bool] = Query(None, description="true = only aircraft in the air, false = only on the ground"),
+    limit: int = Query(500, ge=1, le=2000),
+):
+    """The most recently seen aircraft with a known position."""
+    ground_filter = "" if airborne is None else f"AND on_ground = {'false' if airborne else 'true'}"
+    return jsonable_encoder(run_query(f"""
         SELECT *
         FROM workspace.default.silver_aircraft
-        LIMIT 100
+        WHERE latitude IS NOT NULL
+          AND longitude IS NOT NULL
+          {ground_filter}
+        ORDER BY contact_time DESC
+        LIMIT {limit}
     """))
 
 

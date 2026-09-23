@@ -15,7 +15,7 @@ def get_flights():
     return jsonable_encoder(run_query("""
         SELECT *
         FROM workspace.default.gold_flight_summary
-        LIMIT 50
+        ORDER BY scheduled_departure DESC
     """))
 
 
