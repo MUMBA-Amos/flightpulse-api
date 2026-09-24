@@ -19,7 +19,7 @@ flowchart LR
     U -- routes, cached 24 h --> ADS[adsbdb]
 ```
 
-- **Databricks** holds the data, loaded by two scheduled jobs: aircraft positions and KUL/PEN weather reports every 30 minutes, and landed departures from KUL and PEN from Aviationstack once a day. The flights are kept as a day-by-day history, from which the `gold_insights_*` tables are built (on time = departed within 15 minutes). The pipeline notebooks aren't published yet.
+- **Databricks** holds the data, loaded by two scheduled jobs: aircraft positions and KUL/PEN weather reports every 30 minutes, and landed departures from KUL and PEN from Aviationstack once a day. The flights are kept as a day-by-day history, from which the `gold_insights_*` tables are built (on time = departed within 15 minutes). The pipeline is in [flightpulse-pipeline](https://github.com/MUMBA-Amos/flightpulse-pipeline).
 - **Caching** keeps things fast and within the outside services' limits: Databricks results for 60 seconds, weather for 10 minutes, routes for 24 hours, and airport coordinates for the life of the process. Weather for many airports is fetched in one batch request.
 - **nginx** rate-limits each visitor by their real IP (passed on by Vercel), with a tighter limit on endpoints that call outside services.
 
@@ -44,7 +44,7 @@ All responses are JSON. Interactive docs: https://flightpulse-frontend.vercel.ap
 
 ## Running locally
 
-You need Python 3.9+ and access to a Databricks SQL warehouse that has the FlightPulse tables. The pipeline that creates them isn't in this repo, so without it the data endpoints return errors or empty results (weather and routes still work).
+You need Python 3.9+ and access to a Databricks SQL warehouse that has the FlightPulse tables. They're created by [flightpulse-pipeline](https://github.com/MUMBA-Amos/flightpulse-pipeline); without them the data endpoints return errors or empty results (weather and routes still work).
 
 ```bash
 python3 -m venv .venv
