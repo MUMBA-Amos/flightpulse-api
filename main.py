@@ -9,6 +9,7 @@ from routes.aircraft import router as aircraft_router
 from routes.stats import router as stats_router
 from routes.weather import router as weather_router
 from routes.insights import router as insights_router
+from database.databricks import start_refresher
 import os
 
 
@@ -17,6 +18,9 @@ load_dotenv(BASE_DIR / ".env")
 
 
 app = FastAPI(title="FlightPulse API")
+
+# Keeps the saved Databricks results fresh (see database/databricks.py).
+start_refresher()
 
 app.include_router(flights_router)
 app.include_router(airlines_router)
