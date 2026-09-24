@@ -10,6 +10,15 @@ echo "==> Locking down secrets"
 # Only the ubuntu user (which runs the API) may read the Databricks token.
 chmod 600 "$DEPLOY_DIR/../.env"
 
+echo "==> Installing Python packages"
+# Keeps the server in step with requirements.txt, so a new package can't
+# leave the restarted API unable to start.
+APP_DIR="$(cd "$DEPLOY_DIR/.." && pwd)"
+if [ ! -x "$APP_DIR/.venv/bin/pip" ]; then
+  python3 -m venv "$APP_DIR/.venv"
+fi
+"$APP_DIR/.venv/bin/pip" install --quiet --requirement "$APP_DIR/requirements.txt"
+
 echo "==> Installing the API service"
 sudo cp "$DEPLOY_DIR/flightpulse-api.service" /etc/systemd/system/
 sudo systemctl daemon-reload
