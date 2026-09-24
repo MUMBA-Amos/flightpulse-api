@@ -8,6 +8,7 @@ from routes.airports import router as airports_router
 from routes.aircraft import router as aircraft_router
 from routes.stats import router as stats_router
 from routes.weather import router as weather_router
+from routes.insights import router as insights_router
 import os
 
 
@@ -23,6 +24,7 @@ app.include_router(airports_router)
 app.include_router(aircraft_router)
 app.include_router(stats_router)
 app.include_router(weather_router)
+app.include_router(insights_router)
 
 @app.get("/")
 def root():
