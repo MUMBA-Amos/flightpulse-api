@@ -40,9 +40,11 @@ sudo systemctl reload nginx
 # The website used to be served from here too; it now lives on Vercel.
 sudo rm -rf /var/www/flightpulse "$HOME/flightpulse-web"
 
-echo "==> Checking the API (the first request connects to Databricks, so it can take a few seconds)"
+# Checks the API itself is up, not Databricks: the data may be temporarily
+# unavailable (e.g. its free daily limit), which a deploy can't fix.
+echo "==> Checking the API"
 sleep 3
-if curl -fsS --max-time 60 http://localhost/api/stats/; then
+if curl -fsS --max-time 30 http://localhost/api/; then
   echo
   echo "==> Done. The API is live at http://$(curl -fsS --max-time 5 https://checkip.amazonaws.com || echo YOUR-IP)/api/"
 else

@@ -12,3 +12,6 @@ __pycache__/
 
 # Template with setting names only
 !.env.example
+
+# Last good query results, kept on the server as a fallback
+.cache/

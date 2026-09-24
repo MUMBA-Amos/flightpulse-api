@@ -33,7 +33,7 @@ jobs:
 
       - name: Copy code to the server
         run: |
-          rsync -az --exclude .git --exclude .github --exclude .venv --exclude __pycache__ \
+          rsync -az --exclude .git --exclude .github --exclude .venv --exclude __pycache__ --exclude .cache \
             -e "ssh -i ~/.ssh/deploy_key" \
             ./ "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:~/flightpulse-api/"
 
