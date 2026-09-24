@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.encoders import jsonable_encoder
 
 from database.databricks import run_query
+from services.airports import coordinates_for
 
 
 router = APIRouter(
@@ -10,11 +11,11 @@ router = APIRouter(
 )
 
 
-# Airports whose departures are collected daily for delay insights (IATA codes).
+# Airports whose departures are collected daily for delay insights, by IATA code.
 # Built by the gold notebook from silver_flights_history; see gold_insights_*.
 TRACKED_AIRPORTS = {
-    "KUL": "Kuala Lumpur International",
-    "PEN": "Penang International",
+    "KUL": {"name": "Kuala Lumpur International", "icao": "WMKK"},
+    "PEN": {"name": "Penang International", "icao": "WMKP"},
 }
 
 # name in the response -> (gold table, sort order)
@@ -32,8 +33,8 @@ def get_tracked_airports():
     """The airports with delay insights, with each one's headline figures (null until data exists)."""
     summaries = {row["airport"]: row for row in _rows("gold_insights_summary", "airport")}
     return jsonable_encoder([
-        {"airport": code, "name": name, "summary": summaries.get(code)}
-        for code, name in TRACKED_AIRPORTS.items()
+        {"airport": code, "name": info["name"], "summary": summaries.get(code)}
+        for code, info in TRACKED_AIRPORTS.items()
     ])
 
 
@@ -44,16 +45,41 @@ def get_airport_insights(airport: str):
     if airport not in TRACKED_AIRPORTS:
         raise HTTPException(status_code=404, detail=f"No delay insights for {airport}")
 
+    info = TRACKED_AIRPORTS[airport]
     summary = _rows("gold_insights_summary", "airport", airport)
     result = {
         "airport": airport,
-        "name": TRACKED_AIRPORTS[airport],
+        "name": info["name"],
         "summary": summary[0] if summary else None,
     }
     for name, (table, order) in TABLES.items():
         result[name] = _rows(table, order, airport)
 
+    _add_coordinates(result, info["icao"])
     return jsonable_encoder(result)
+
+
+def _add_coordinates(result, airport_icao):
+    """Latitude/longitude for the airport and each route's destination, for the route map."""
+    # The route table has IATA codes; the coordinate lookup needs ICAO.
+    try:
+        rows = run_query("""
+            SELECT arrival_iata, first(arrival_icao, true) AS arrival_icao
+            FROM workspace.default.silver_flights_history
+            WHERE departure_iata = ? AND arrival_iata IS NOT NULL
+            GROUP BY arrival_iata
+        """, (result["airport"],))
+    except Exception as error:
+        if "TABLE_OR_VIEW_NOT_FOUND" not in str(error):
+            raise
+        rows = []
+    icao_by_iata = {row["arrival_iata"]: row["arrival_icao"] for row in rows}
+    coordinates = coordinates_for(airport_icao, *icao_by_iata.values())
+
+    latitude, longitude = coordinates.get(airport_icao, (None, None))
+    result["latitude"], result["longitude"] = latitude, longitude
+    for route in result["routes"]:
+        route["latitude"], route["longitude"] = coordinates.get(icao_by_iata.get(route["arrival_iata"]), (None, None))
 
 
 def _rows(table, order, airport=None):

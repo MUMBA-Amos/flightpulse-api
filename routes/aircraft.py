@@ -8,6 +8,7 @@ from fastapi import APIRouter, Query
 from fastapi.encoders import jsonable_encoder
 
 from database.databricks import run_query
+from services.airports import coordinates_for
 
 
 router = APIRouter(
@@ -20,16 +21,12 @@ router = APIRouter(
 # callsign: first in our own Aviationstack flights, then in adsbdb.com (free,
 # no key). adsbdb knows a callsign's usual route, not necessarily today's.
 ADSBDB_URL = "https://api.adsbdb.com/v0/callsign/{}"
-# Airport coordinates for routes from our own flights, which only carry codes.
-AIRPORT_URL = "https://aviationweather.gov/api/data/airport"
 ROUTE_CACHE_SECONDS = 24 * 60 * 60
 UNKNOWN_CACHE_SECONDS = 60 * 60
 CALLSIGN_PATTERN = re.compile(r"^[A-Z0-9]{2,8}$")
 
 _route_cache = {}
 _route_cache_lock = threading.Lock()
-# Airports don't move, so their coordinates are kept for the life of the process.
-_airport_coordinates = {}
 
 
 @router.get("/")
@@ -94,7 +91,7 @@ def _route_from_flights(callsign):
         return None
 
     f = rows[0]
-    coordinates = _coordinates_for(f["departure_icao"], f["arrival_icao"])
+    coordinates = coordinates_for(f["departure_icao"], f["arrival_icao"])
     return {
         "callsign": callsign,
         "source": "flights",
@@ -129,27 +126,6 @@ def _route_from_adsbdb(callsign):
         "destination": _airport(destination.get("iata_code"), destination.get("icao_code"), destination.get("name"),
                                 destination.get("municipality"), destination.get("latitude"), destination.get("longitude")),
     }
-
-
-def _coordinates_for(*icao_codes):
-    """{icao: (latitude, longitude)} for the given airports, from the cache or the Aviation Weather Center."""
-    wanted = [code for code in icao_codes if code]
-    with _route_cache_lock:
-        missing = [code for code in wanted if code not in _airport_coordinates]
-
-    if missing:
-        try:
-            response = httpx.get(AIRPORT_URL, params={"ids": ",".join(missing), "format": "json"}, timeout=5)
-            airports = response.json() if response.status_code == 200 else []
-        except (httpx.HTTPError, ValueError):
-            airports = []
-        with _route_cache_lock:
-            for airport in airports:
-                if airport.get("icaoId") and airport.get("lat") is not None and airport.get("lon") is not None:
-                    _airport_coordinates[airport["icaoId"]] = (airport["lat"], airport["lon"])
-
-    with _route_cache_lock:
-        return {code: _airport_coordinates[code] for code in wanted if code in _airport_coordinates}
 
 
 def _airport(iata, icao, name, city, latitude=None, longitude=None):
