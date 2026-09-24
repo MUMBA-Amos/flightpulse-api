@@ -14,13 +14,14 @@ flowchart LR
         N[nginx<br/>rate limits, logs] --> U[uvicorn + FastAPI<br/>2 workers, systemd]
     end
 
-    U -- SQL, cached 60 s --> DB[(Databricks<br/>silver and gold tables)]
+    U -- saved results, refreshed hourly --> DB[(Databricks<br/>silver and gold tables)]
     U -- METAR, cached 10 min --> AWC[Aviation Weather Center]
     U -- routes, cached 24 h --> ADS[adsbdb]
 ```
 
-- **Databricks** holds the data, loaded by two scheduled jobs: aircraft positions and KUL/PEN weather reports every 30 minutes, and landed departures from KUL and PEN from Aviationstack once a day. The flights are kept as a day-by-day history, from which the `gold_insights_*` tables are built (on time = departed within 15 minutes). The pipeline is in [flightpulse-pipeline](https://github.com/MUMBA-Amos/flightpulse-pipeline).
-- **Caching** keeps things fast and within the outside services' limits: Databricks results for 60 seconds, weather for 10 minutes, routes for 24 hours, and airport coordinates for the life of the process. Weather for many airports is fetched in one batch request.
+- **Databricks** holds the data, loaded by two scheduled jobs: aircraft positions and KUL/PEN weather reports hourly, and landed departures from KUL and PEN once a day. The flights are kept as a day-by-day history, from which the `gold_insights_*` tables are built (on time = departed within 15 minutes). The pipeline is in [flightpulse-pipeline](https://github.com/MUMBA-Amos/flightpulse-pipeline).
+- **Serving layer.** Visitors never wait on Databricks: every query's result is saved on the server's disk and requests are answered from that copy. A background task refreshes all saved queries **once an hour, in one burst**, so the warehouse wakes briefly once an hour however many people visit. This keeps the site within Databricks' free daily compute limit and **serves the last good data when Databricks is unavailable**. Only a query the API has never seen goes to Databricks directly; queries unused for a day drop out of the refresh. See [`database/databricks.py`](database/databricks.py).
+- **Other caching:** weather for 10 minutes, routes for 24 hours, and airport coordinates for the life of the process. Weather for many airports is fetched in one batch request.
 - **nginx** rate-limits each visitor by their real IP (passed on by Vercel), with a tighter limit on endpoints that call outside services.
 
 ## Endpoints
