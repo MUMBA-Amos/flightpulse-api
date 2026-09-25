@@ -24,6 +24,9 @@ router = APIRouter(
 # favours, and a SimBrief link with the flight filled in. All of it comes from
 # free outside services, never from Databricks.
 ADSBDB_AIRCRAFT_URL = "https://api.adsbdb.com/v0/aircraft/{}"
+# Second source for aircraft adsbdb doesn't know (free, no key; rejects requests without a user agent).
+HEXDB_AIRCRAFT_URL = "https://hexdb.io/api/v1/aircraft/{}"
+USER_AGENT = "FlightPulse/1.0 (+https://flightpulse-frontend.vercel.app)"
 SIMBRIEF_URL = "https://dispatch.simbrief.com/options/custom"
 AIRCRAFT_CACHE_SECONDS = 24 * 60 * 60
 ICAO24_PATTERN = re.compile(r"^[0-9a-f]{6}$")
@@ -101,34 +104,68 @@ def _route(callsign):
 
 
 def _aircraft(icao24):
-    """Type and registration from adsbdb, cached for a day; None when unknown or the lookup fails."""
+    """
+    Type and registration from adsbdb, or hexdb.io when adsbdb doesn't know the
+    aircraft; cached for a day. None when neither knows it or the lookups fail.
+    """
     now = time.monotonic()
     with _aircraft_cache_lock:
         cached = _aircraft_cache.get(icao24)
     if cached and now < cached[0]:
         return cached[1]
 
-    try:
-        response = httpx.get(ADSBDB_AIRCRAFT_URL.format(icao24), timeout=5)
-        data = response.json().get("response")
-    except (httpx.HTTPError, ValueError):
-        return None
-
-    found = data.get("aircraft") if isinstance(data, dict) else None
-    aircraft = {
-        "type": found.get("type"),
-        "icao_type": found.get("icao_type"),
-        "manufacturer": found.get("manufacturer"),
-        "registration": found.get("registration"),
-        "owner": found.get("registered_owner"),
-        "photo": found.get("url_photo_thumbnail"),
-    } if found else None
+    aircraft = _aircraft_from_adsbdb(icao24)
+    if not aircraft:
+        from_hexdb = _aircraft_from_hexdb(icao24)
+        if from_hexdb is None or aircraft is None:
+            # A lookup failed rather than finding nothing, so don't remember the miss.
+            return from_hexdb or None
+        aircraft = from_hexdb or None
 
     with _aircraft_cache_lock:
         if len(_aircraft_cache) > 5000:
             _aircraft_cache.clear()
         _aircraft_cache[icao24] = (now + AIRCRAFT_CACHE_SECONDS, aircraft)
     return aircraft
+
+
+def _aircraft_from_adsbdb(icao24):
+    """The aircraft, {} if adsbdb doesn't know it, or None if the lookup failed."""
+    try:
+        response = httpx.get(ADSBDB_AIRCRAFT_URL.format(icao24), timeout=5)
+        data = response.json().get("response")
+    except (httpx.HTTPError, ValueError):
+        return None
+    found = data.get("aircraft") if isinstance(data, dict) else None
+    if not found:
+        return {}
+    return {
+        "type": found.get("type"),
+        "icao_type": found.get("icao_type"),
+        "manufacturer": found.get("manufacturer"),
+        "registration": found.get("registration"),
+        "owner": found.get("registered_owner"),
+        "photo": found.get("url_photo_thumbnail"),
+    }
+
+
+def _aircraft_from_hexdb(icao24):
+    """The aircraft, {} if hexdb.io doesn't know it, or None if the lookup failed."""
+    try:
+        response = httpx.get(HEXDB_AIRCRAFT_URL.format(icao24), headers={"User-Agent": USER_AGENT}, timeout=5)
+        found = response.json()
+    except (httpx.HTTPError, ValueError):
+        return None
+    if not isinstance(found, dict) or not found.get("ICAOTypeCode"):
+        return {} if response.status_code == 404 or isinstance(found, dict) else None
+    return {
+        "type": found.get("Type"),
+        "icao_type": found.get("ICAOTypeCode"),
+        "manufacturer": found.get("Manufacturer"),
+        "registration": found.get("Registration"),
+        "owner": found.get("RegisteredOwners"),
+        "photo": None,
+    }
 
 
 def _briefing_airport(airport, details, metars, tafs):

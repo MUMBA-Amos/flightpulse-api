@@ -90,4 +90,4 @@ ssh <server> 'bash ~/flightpulse-api/deploy/setup.sh'
 
 ## Data sources
 
-[OpenSky Network](https://opensky-network.org) (aircraft positions), [Aviationstack](https://aviationstack.com) (flights and delays), [Aviation Weather Center](https://aviationweather.gov) (weather, forecasts and airport details) and [adsbdb](https://www.adsbdb.com) (flight routes and aircraft types). Check each source's terms before commercial use; OpenSky's free data is for non-commercial use.
+[OpenSky Network](https://opensky-network.org) (aircraft positions), [Aviationstack](https://aviationstack.com) (flights and delays), [Aviation Weather Center](https://aviationweather.gov) (weather, forecasts and airport details) and [adsbdb](https://www.adsbdb.com) (flight routes and aircraft types), with [hexdb.io](https://hexdb.io) for aircraft adsbdb doesn't know. Check each source's terms before commercial use; OpenSky's free data is for non-commercial use.
