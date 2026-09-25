@@ -8,6 +8,7 @@ from fastapi import APIRouter, Query
 from fastapi.encoders import jsonable_encoder
 
 from database.databricks import run_query
+from routes.flights import all_flights
 from services.airports import coordinates_for
 
 
@@ -24,6 +25,9 @@ ADSBDB_URL = "https://api.adsbdb.com/v0/callsign/{}"
 ROUTE_CACHE_SECONDS = 24 * 60 * 60
 UNKNOWN_CACHE_SECONDS = 60 * 60
 CALLSIGN_PATTERN = re.compile(r"^[A-Z0-9]{2,8}$")
+# The most aircraft the list returns. It's always fetched at this size and cut
+# down to the requested limit, so the limit can't create new Databricks queries.
+MAX_AIRCRAFT = 2000
 
 _route_cache = {}
 _route_cache_lock = threading.Lock()
@@ -32,7 +36,7 @@ _route_cache_lock = threading.Lock()
 @router.get("/")
 def get_aircraft(
     airborne: Optional[bool] = Query(None, description="true = only aircraft in the air, false = only on the ground"),
-    limit: int = Query(500, ge=1, le=2000),
+    limit: int = Query(500, ge=1, le=MAX_AIRCRAFT),
 ):
     """The most recently seen aircraft with a known position."""
     ground_filter = "" if airborne is None else f"AND on_ground = {'false' if airborne else 'true'}"
@@ -43,8 +47,8 @@ def get_aircraft(
           AND longitude IS NOT NULL
           {ground_filter}
         ORDER BY contact_time DESC
-        LIMIT {limit}
-    """))
+        LIMIT {MAX_AIRCRAFT}
+    """)[:limit])
 
 
 @router.get("/route/{callsign}")
@@ -85,19 +89,12 @@ def cached_route(callsign):
 
 
 def _route_from_flights(callsign):
-    rows = run_query("""
-        SELECT airline_name,
-               departure_airport, departure_iata, departure_icao,
-               arrival_airport, arrival_iata, arrival_icao
-        FROM workspace.default.gold_flight_summary
-        WHERE flight_icao = ?
-        LIMIT 1
-    """, (callsign,))
-
-    if not rows:
+    # Looked up in the saved flight list rather than queried, so each new
+    # callsign doesn't send a new query to Databricks.
+    f = next((row for row in all_flights() if row["flight_icao"] == callsign), None)
+    if f is None:
         return None
 
-    f = rows[0]
     coordinates = coordinates_for(f["departure_icao"], f["arrival_icao"])
     return {
         "callsign": callsign,

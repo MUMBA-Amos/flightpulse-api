@@ -32,6 +32,10 @@ REFRESH_SECONDS = 60 * 60
 UNUSED_AFTER_SECONDS = 24 * 60 * 60
 # How often a query's "last used" time is written back to disk.
 TOUCH_EVERY_SECONDS = 10 * 60
+# The API uses about 25 distinct queries. The cap is a safety net: if a future
+# endpoint let visitors create new queries, it stops them from multiplying the
+# hourly refresh and spending Databricks' daily allowance.
+MAX_SAVED_QUERIES = 100
 
 STORE_DIR = Path(__file__).resolve().parent.parent / ".cache" / "queries"
 LOCK_FILE = STORE_DIR.parent / "refresh.lock"
@@ -63,6 +67,9 @@ def run_query(query, params=None):
     rows = _saved_rows(key)
     if rows is not None:
         return rows
+
+    if _saved_count() >= MAX_SAVED_QUERIES:
+        raise RuntimeError("Too many distinct saved queries; refusing to add another")
 
     rows = _execute_pooled(query, params)
     _save(key, query, params, rows, last_used=time.time())
@@ -114,6 +121,13 @@ def _saved_rows(key):
     if time.time() - entry["touched"] > TOUCH_EVERY_SECONDS:
         _touch(key)
     return entry["rows"]
+
+
+def _saved_count():
+    try:
+        return sum(1 for _ in STORE_DIR.glob("*.json"))
+    except OSError:
+        return 0
 
 
 def _save(key, query, params, rows, last_used):
