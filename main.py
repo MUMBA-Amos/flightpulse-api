@@ -9,6 +9,7 @@ from routes.aircraft import router as aircraft_router
 from routes.stats import router as stats_router
 from routes.weather import router as weather_router
 from routes.insights import router as insights_router
+from routes.sim import router as sim_router
 from database.databricks import start_refresher
 import os
 
@@ -29,6 +30,7 @@ app.include_router(aircraft_router)
 app.include_router(stats_router)
 app.include_router(weather_router)
 app.include_router(insights_router)
+app.include_router(sim_router)
 
 @app.get("/")
 def root():

@@ -77,6 +77,13 @@ def get_aircraft_route(callsign: str):
     return route
 
 
+def cached_route(callsign):
+    """The route this worker has already looked up for a callsign, or None. Never calls Databricks or adsbdb."""
+    with _route_cache_lock:
+        cached = _route_cache.get(callsign)
+    return cached[1] if cached and time.monotonic() < cached[0] else None
+
+
 def _route_from_flights(callsign):
     rows = run_query("""
         SELECT airline_name,
