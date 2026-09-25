@@ -31,6 +31,21 @@ ICAO24_PATTERN = re.compile(r"^[0-9a-f]{6}$")
 AIRLINE_CALLSIGN = re.compile(r"^([A-Z]{3})(\d[A-Z0-9]*)$")
 # Below this, the wind doesn't favour any runway.
 CALM_WIND_KT = 3
+# Below this, a level aircraft is more likely holding or on approach than cruising.
+MIN_CRUISE_FT = 10000
+# SimBrief dispatch parameters we fill in, and how the page describes them.
+SIMBRIEF_LABELS = {
+    "orig": "Departure",
+    "dest": "Destination",
+    "airline": "Airline",
+    "fltnum": "Flight number",
+    "callsign": "Callsign",
+    "type": "Aircraft type",
+    "reg": "Registration",
+    "fl": "Cruise altitude",
+    "origrwy": "Departure runway",
+    "destrwy": "Arrival runway",
+}
 
 _aircraft_cache = {}
 _aircraft_cache_lock = threading.Lock()
@@ -40,6 +55,7 @@ _aircraft_cache_lock = threading.Lock()
 def get_sim_briefing(
     callsign: str,
     icao24: Optional[str] = Query(None, description="The aircraft's transponder code, for its type and registration"),
+    cruise_ft: Optional[int] = Query(None, ge=0, le=60000, description="Current altitude, when the aircraft is level at cruise"),
 ):
     """A flight-sim briefing for a live flight: aircraft, airports, weather, likely runways and a SimBrief link."""
     callsign = callsign.strip().upper()
@@ -60,6 +76,7 @@ def get_sim_briefing(
     tafs = latest_tafs(codes)
 
     origin, destination = (_briefing_airport(airport, details, metars, tafs) for airport in ends)
+    simbrief = _simbrief_fields(callsign, origin, destination, aircraft, cruise_ft)
     return {
         "callsign": callsign,
         "airline": route.get("airline"),
@@ -67,7 +84,10 @@ def get_sim_briefing(
         "aircraft": aircraft,
         "origin": origin,
         "destination": destination,
-        "simbrief_url": _simbrief_url(callsign, origin, destination, aircraft),
+        "cruise_level": simbrief.get("fl"),
+        "simbrief_url": f"{SIMBRIEF_URL}?{urlencode(simbrief)}" if simbrief else None,
+        # What the SimBrief link fills in, for the page to show before it's opened.
+        "simbrief_fields": [{"label": SIMBRIEF_LABELS[key], "value": value} for key, value in simbrief.items()],
     }
 
 
@@ -182,16 +202,27 @@ def _runway_ends(runway_id):
     return ends
 
 
-def _simbrief_url(callsign, origin, destination, aircraft):
-    """A SimBrief dispatch link with the flight filled in, or None without both airports."""
+def _simbrief_fields(callsign, origin, destination, aircraft, cruise_ft):
+    """
+    SimBrief dispatch parameters for the flight, or {} without both airports.
+    The waypoint route is left to SimBrief, which builds one; no free source has
+    the route actually filed.
+    """
     if not (origin and origin["icao"] and destination and destination["icao"]):
-        return None
-    params = {"orig": origin["icao"], "dest": destination["icao"]}
+        return {}
+    fields = {"orig": origin["icao"], "dest": destination["icao"]}
     airline_flight = AIRLINE_CALLSIGN.match(callsign)
     if airline_flight:
-        params["airline"], params["fltnum"] = airline_flight.groups()
+        fields["airline"], fields["fltnum"] = airline_flight.groups()
+    fields["callsign"] = callsign
     if aircraft and aircraft.get("icao_type"):
-        params["type"] = aircraft["icao_type"]
+        fields["type"] = aircraft["icao_type"]
     if aircraft and aircraft.get("registration"):
-        params["reg"] = aircraft["registration"]
-    return f"{SIMBRIEF_URL}?{urlencode(params)}"
+        fields["reg"] = aircraft["registration"]
+    if cruise_ft and cruise_ft >= MIN_CRUISE_FT:
+        fields["fl"] = f"FL{round(cruise_ft / 1000) * 10:03d}"
+    for key, airport in (("origrwy", origin), ("destrwy", destination)):
+        runway = airport.get("likely_runway")
+        if runway and runway["ends"]:
+            fields[key] = runway["ends"][0]
+    return fields
