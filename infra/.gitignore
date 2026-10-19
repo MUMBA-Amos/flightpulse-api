@@ -1,0 +1,12 @@
+# Provider downloads
+.terraform/
+
+# State holds resource details; kept locally, never committed
+*.tfstate
+*.tfstate.*
+*.tfplan
+
+# Your values (email, IDs)
+terraform.tfvars
+
+# Commit .terraform.lock.hcl: it pins the provider version.

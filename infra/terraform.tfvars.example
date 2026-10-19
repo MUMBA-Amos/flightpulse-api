@@ -1,0 +1,6 @@
+# Copy to terraform.tfvars (git-ignored) and fill in.
+region             = "ap-southeast-5"
+instance_id        = "i-0123456789abcdef0"
+security_group_id  = "sg-0123456789abcdef0"
+alert_email        = "you@example.com"
+monthly_budget_usd = 15
