@@ -37,6 +37,33 @@ sudo rm -f /etc/nginx/sites-enabled/default
 sudo nginx -t
 sudo systemctl reload nginx
 
+echo "==> Configuring monitoring (Grafana Alloy)"
+# Sends metrics and logs to Grafana Cloud. Monitoring must never block a
+# deploy, so any problem here only prints a warning. (set -e doesn't apply
+# inside a function called with ||, hence the explicit "|| return 1".)
+setup_alloy() {
+  if ! command -v alloy >/dev/null; then
+    sudo mkdir -p /etc/apt/keyrings || return 1
+    curl -fsSL https://apt.grafana.com/gpg.key | gpg --dearmor \
+      | sudo tee /etc/apt/keyrings/grafana.gpg > /dev/null || return 1
+    echo "deb [signed-by=/etc/apt/keyrings/grafana.gpg] https://apt.grafana.com stable main" \
+      | sudo tee /etc/apt/sources.list.d/grafana.list > /dev/null || return 1
+    sudo apt-get update || return 1
+    sudo apt-get install -y alloy || return 1
+  fi
+  # The token lives only on the server, like .env.
+  if ! sudo grep -q '^GRAFANA_CLOUD_TOKEN=.' /etc/default/alloy; then
+    echo "WARNING: no GRAFANA_CLOUD_TOKEN in /etc/default/alloy; monitoring is off."
+    return 0
+  fi
+  # Lets Alloy read the journal and nginx's log.
+  sudo usermod -aG adm,systemd-journal alloy || return 1
+  sudo cp "$DEPLOY_DIR/alloy-config.alloy" /etc/alloy/config.alloy || return 1
+  sudo systemctl enable alloy || return 1
+  sudo systemctl restart alloy
+}
+setup_alloy || echo "WARNING: monitoring setup failed; the API deploy continues."
+
 # The website used to be served from here too; it now lives on Vercel.
 sudo rm -rf /var/www/flightpulse "$HOME/flightpulse-web"
 

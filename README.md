@@ -87,6 +87,7 @@ ssh <server> 'bash ~/flightpulse-api/deploy/setup.sh'
 | `flightpulse-api.service` | systemd service: uvicorn with 2 workers, restarts on failure |
 | `nginx-flightpulse.conf` | Forwards `/api/*` to the API, rate limits, access log |
 | `nginx-flightpulse-proxy.conf` | Proxy settings shared by the nginx locations |
+| `alloy-config.alloy` | Grafana Alloy: sends server metrics, the journal and nginx's request log to Grafana Cloud. Needs `GRAFANA_CLOUD_TOKEN=…` in `/etc/default/alloy` on the server; without it, monitoring is skipped |
 
 ## Data sources
 

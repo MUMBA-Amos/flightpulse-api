@@ -1,0 +1,170 @@
+// Grafana Alloy: sends this server's metrics and logs to Grafana Cloud.
+// Installed to /etc/alloy/config.alloy by setup.sh.
+// The token is read from GRAFANA_CLOUD_TOKEN in /etc/default/alloy on the
+// server; it's never in git.
+
+// ---- Where data goes ----
+
+prometheus.remote_write "metrics_service" {
+  endpoint {
+    url = "https://prometheus-prod-37-prod-ap-southeast-1.grafana.net/api/prom/push"
+
+    basic_auth {
+      username = "3688061"
+      password = sys.env("GRAFANA_CLOUD_TOKEN")
+    }
+  }
+}
+
+loki.write "grafana_cloud_loki" {
+  endpoint {
+    url = "https://logs-prod-020.grafana.net/loki/api/v1/push"
+
+    basic_auth {
+      username = "1839695"
+      password = sys.env("GRAFANA_CLOUD_TOKEN")
+    }
+  }
+}
+
+// ---- Server metrics: CPU, memory, disk, network ----
+
+prometheus.exporter.unix "integrations_node_exporter" {
+  disable_collectors = ["ipvs", "btrfs", "infiniband", "xfs", "zfs"]
+
+  filesystem {
+    fs_types_exclude     = "^(autofs|binfmt_misc|bpf|cgroup2?|configfs|debugfs|devpts|devtmpfs|tmpfs|fusectl|hugetlbfs|iso9660|mqueue|nsfs|overlay|proc|procfs|pstore|rpc_pipefs|securityfs|selinuxfs|squashfs|sysfs|tracefs)$"
+    mount_points_exclude = "^/(dev|proc|run/credentials/.+|sys|var/lib/docker/.+)($|/)"
+    mount_timeout        = "5s"
+  }
+
+  netclass {
+    ignored_devices = "^(veth.*|cali.*|[a-f0-9]{15})$"
+  }
+
+  netdev {
+    device_exclude = "^(veth.*|cali.*|[a-f0-9]{15})$"
+  }
+}
+
+discovery.relabel "integrations_node_exporter" {
+  targets = prometheus.exporter.unix.integrations_node_exporter.targets
+
+  rule {
+    target_label = "instance"
+    replacement  = constants.hostname
+  }
+
+  rule {
+    target_label = "job"
+    replacement  = "integrations/node_exporter"
+  }
+}
+
+prometheus.scrape "integrations_node_exporter" {
+  targets         = discovery.relabel.integrations_node_exporter.output
+  forward_to      = [prometheus.relabel.integrations_node_exporter.receiver]
+  scrape_interval = "60s"
+}
+
+prometheus.relabel "integrations_node_exporter" {
+  forward_to = [prometheus.remote_write.metrics_service.receiver]
+
+  rule {
+    source_labels = ["__name__"]
+    regex         = "node_scrape_collector_.+"
+    action        = "drop"
+  }
+}
+
+// ---- Alloy's own health, used by Grafana's "Test connection" ----
+
+prometheus.exporter.self "alloy_check" { }
+
+discovery.relabel "alloy_check" {
+  targets = prometheus.exporter.self.alloy_check.targets
+
+  rule {
+    target_label = "instance"
+    replacement  = constants.hostname
+  }
+
+  rule {
+    target_label = "alloy_hostname"
+    replacement  = constants.hostname
+  }
+
+  rule {
+    target_label = "job"
+    replacement  = "integrations/alloy-check"
+  }
+}
+
+prometheus.scrape "alloy_check" {
+  targets         = discovery.relabel.alloy_check.output
+  forward_to      = [prometheus.relabel.alloy_check.receiver]
+  scrape_interval = "60s"
+}
+
+prometheus.relabel "alloy_check" {
+  forward_to = [prometheus.remote_write.metrics_service.receiver]
+
+  rule {
+    source_labels = ["__name__"]
+    regex         = "(prometheus_target_sync_length_seconds_sum|prometheus_target_scrapes_.*|prometheus_target_interval.*|prometheus_sd_discovered_targets|alloy_build.*|prometheus_remote_write_wal_samples_appended_total|process_start_time_seconds)"
+    action        = "keep"
+  }
+}
+
+// ---- Logs ----
+
+// The systemd journal, which includes the API's own output: search it in
+// Grafana with {unit="flightpulse-api.service"}.
+loki.source.journal "journal" {
+  max_age       = "24h0m0s"
+  relabel_rules = discovery.relabel.journal.rules
+  forward_to    = [loki.write.grafana_cloud_loki.receiver]
+}
+
+discovery.relabel "journal" {
+  targets = []
+
+  rule {
+    source_labels = ["__journal__systemd_unit"]
+    target_label  = "unit"
+  }
+
+  rule {
+    source_labels = ["__journal__boot_id"]
+    target_label  = "boot_id"
+  }
+
+  rule {
+    source_labels = ["__journal__transport"]
+    target_label  = "transport"
+  }
+
+  rule {
+    source_labels = ["__journal_priority_keyword"]
+    target_label  = "level"
+  }
+}
+
+// System logs, and nginx's log of every API request (see
+// nginx-flightpulse.conf): search with {job="nginx"}.
+local.file_match "logs" {
+  path_targets = [{
+    __path__ = "/var/log/{syslog,messages,*.log}",
+    instance = constants.hostname,
+    job      = "integrations/node_exporter",
+  }, {
+    __path__ = "/var/log/nginx/flightpulse.log",
+    instance = constants.hostname,
+    job      = "nginx",
+  }]
+}
+
+loki.source.file "logs" {
+  targets    = local.file_match.logs.targets
+  forward_to = [loki.write.grafana_cloud_loki.receiver]
+}
